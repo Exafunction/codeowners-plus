@@ -35,8 +35,9 @@ RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -v -o codeowners main.go
 
 FROM mirror.gcr.io/library/busybox:1-musl
 
-COPY --from=git-builder /git /usr/local/bin/
-COPY --from=builder /app/codeowners /usr/local/bin/
-COPY entrypoint.sh /
+COPY --link --from=gcr.io/distroless/static-debian12:latest /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+COPY --link --from=git-builder /git /usr/local/bin/
+COPY --link --from=builder /app/codeowners /usr/local/bin/
+COPY --link entrypoint.sh /
 
 ENTRYPOINT ["/entrypoint.sh"]
