@@ -30,4 +30,4 @@ outputs:
 
 runs:
   using: 'docker'
-  image: 'docker://registry-dev-sv7.corp.exafunction.com:5000/codeowners-plus@sha256:7dc54ab03633d7776feced5e202c89d2a207d227126b82fdf44f22556ec2ea28'
+  image: 'docker://registry-dev-sv7.corp.exafunction.com:5000/codeowners-plus@sha256:56730b242b6fd3303e3c53f7f39707eb7c6d838d148e261ed169e5c9e9154ec3'
