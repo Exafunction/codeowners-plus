@@ -56,10 +56,9 @@ func (om *ownersMap) SetAuthor(author string) {
 	for _, reviewers := range om.nameReviewerMap[author] {
 		// remove author from the reviewers list
 		reviewers.Names = f.RemoveValue(reviewers.Names, author)
-		if len(reviewers.Names) == 0 {
-			// mark the reviewer as approved if they are the author
-			reviewers.Approved = true
-		}
+		// mark the reviewer group as approved since the author is one of the owners
+		// This handles the OR case where multiple owners are listed but author approval is sufficient
+		reviewers.Approved = true
 	}
 	om.author = author
 }
