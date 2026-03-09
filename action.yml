@@ -30,4 +30,4 @@ outputs:
 
 runs:
   using: 'docker'
-  image: 'docker://ghcr.io/multimediallc/codeowners-plus:latest'
+  image: 'docker://ghcr.io/multimediallc/codeowners-plus@sha256:8f9b834d270546cfafa9b3e6774722a93e7178fbeb08415c1bc2e655bb7f8637'
