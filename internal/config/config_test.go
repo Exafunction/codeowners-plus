@@ -70,6 +70,60 @@ unskippable_reviewers = ["@user1"]
 			expectedErr: false,
 		},
 		{
+			name: "config with require_both_branch_reviewers enabled",
+			configContent: `
+require_both_branch_reviewers = true
+max_reviews = 2
+`,
+			path: "testdata/",
+			expected: &Config{
+				MaxReviews:                 intPtr(2),
+				MinReviews:                 nil,
+				UnskippableReviewers:       []string{},
+				Ignore:                     []string{},
+				Enforcement:                &Enforcement{Approval: false, FailCheck: true},
+				HighPriorityLabels:         []string{},
+				DetailedReviewers:          false,
+				DisableSmartDismissal:      false,
+				RequireBothBranchReviewers: true,
+			},
+			expectedErr: false,
+		},
+		{
+			name: "config with suppress_unowned_warning enabled",
+			configContent: `
+suppress_unowned_warning = true
+`,
+			path: "testdata/",
+			expected: &Config{
+				MaxReviews:             nil,
+				MinReviews:             nil,
+				UnskippableReviewers:   []string{},
+				Ignore:                 []string{},
+				Enforcement:            &Enforcement{Approval: false, FailCheck: true},
+				HighPriorityLabels:     []string{},
+				SuppressUnownedWarning: true,
+			},
+			expectedErr: false,
+		},
+		{
+			name: "config with allow_self_approval enabled",
+			configContent: `
+allow_self_approval = true
+`,
+			path: "testdata/",
+			expected: &Config{
+				MaxReviews:           nil,
+				MinReviews:           nil,
+				UnskippableReviewers: []string{},
+				Ignore:               []string{},
+				Enforcement:          &Enforcement{Approval: false, FailCheck: true},
+				HighPriorityLabels:   []string{},
+				AllowSelfApproval:    true,
+			},
+			expectedErr: false,
+		},
+		{
 			name: "invalid toml",
 			configContent: `
 max_reviews = invalid
@@ -100,7 +154,7 @@ max_reviews = invalid
 			// Test with and without trailing slash
 			paths := []string{configPath, configPath + "/"}
 			for _, path := range paths {
-				got, err := ReadConfig(path)
+				got, err := ReadConfig(path, nil)
 				if tc.expectedErr {
 					if err == nil {
 						t.Error("expected error but got none")
@@ -147,6 +201,18 @@ max_reviews = invalid
 					t.Errorf("Ignore: expected %v, got %v", tc.expected.Ignore, got.Ignore)
 				}
 
+				if got.RequireBothBranchReviewers != tc.expected.RequireBothBranchReviewers {
+					t.Errorf("RequireBothBranchReviewers: expected %v, got %v", tc.expected.RequireBothBranchReviewers, got.RequireBothBranchReviewers)
+				}
+
+				if got.SuppressUnownedWarning != tc.expected.SuppressUnownedWarning {
+					t.Errorf("SuppressUnownedWarning: expected %v, got %v", tc.expected.SuppressUnownedWarning, got.SuppressUnownedWarning)
+				}
+
+				if got.AllowSelfApproval != tc.expected.AllowSelfApproval {
+					t.Errorf("AllowSelfApproval: expected %v, got %v", tc.expected.AllowSelfApproval, got.AllowSelfApproval)
+				}
+
 				if tc.expected.Enforcement != nil {
 					if got.Enforcement == nil {
 						t.Error("expected Enforcement to be set")
@@ -176,7 +242,7 @@ func TestReadConfigFileError(t *testing.T) {
 	}
 
 	// Try to read config from directory with no permissions
-	_, err = ReadConfig(configPath)
+	_, err = ReadConfig(configPath, nil)
 	if err == nil {
 		t.Error("expected error when reading from directory with no permissions")
 	}

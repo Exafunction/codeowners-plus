@@ -34,18 +34,18 @@ func TestRead(t *testing.T) {
 			optional:     0,
 		},
 		{
-			name:     "non-directory file",
-			path:     "../../test_project/a.py",
-			fallback: false,
-			owners:   0,
+			name:       "non-directory file",
+			path:       "../../test_project/a.py",
+			fallback:   false,
+			owners:     0,
 			additional: 0,
 			optional:   0,
 		},
 		{
-			name:     "empty directory",
-			path:     "../../test_project/empty",
-			fallback: false,
-			owners:   0,
+			name:       "empty directory",
+			path:       "../../test_project/empty",
+			fallback:   false,
+			owners:     0,
 			additional: 0,
 			optional:   0,
 		},
@@ -54,14 +54,14 @@ func TestRead(t *testing.T) {
 	rgMan := NewReviewerGroupMemo()
 	for _, tc := range tt {
 		t.Run(tc.name, func(t *testing.T) {
-			rules := Read(tc.path, rgMan, io.Discard)
+			rules := Read(tc.path, rgMan, nil, io.Discard)
 
 			if !tc.fallback && rules.Fallback != nil {
 				t.Errorf("Expected fallback to be nil, got %+v", rules.Fallback)
 			}
 
-			if tc.fallback && rules.Fallback.Names[0] != tc.fallbackName {
-				t.Errorf("Expected fallback to be %s, got %s", tc.fallbackName, rules.Fallback.Names[0])
+			if tc.fallback && rules.Fallback.Names[0].Original() != tc.fallbackName {
+				t.Errorf("Expected fallback to be %s, got %s", tc.fallbackName, rules.Fallback.Names[0].Original())
 			}
 
 			if len(rules.OwnerTests) != tc.owners {

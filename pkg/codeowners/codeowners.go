@@ -3,15 +3,22 @@ package codeowners
 import (
 	"errors"
 	"io"
+	"slices"
 	"strings"
 
 	"github.com/multimediallc/codeowners-plus/pkg/functional"
 )
 
+type AuthorMode int
+
+const (
+	AuthorModeDefault      AuthorMode = iota // Author is removed from their groups; group is only auto-satisfied if it becomes empty
+	AuthorModeSelfApproval                   // Author auto-satisfies any OR group they belong to
+)
+
 // CodeOwners represents a collection of owned files, with reverse lookups for owners and reviewers
 type CodeOwners interface {
-	// SetAuthor sets the author of the PR
-	SetAuthor(author string)
+	SetAuthor(author string, mode AuthorMode)
 
 	// FileRequired returns a map of file names to their required reviewers
 	FileRequired() map[string]ReviewerGroups
@@ -29,13 +36,14 @@ type CodeOwners interface {
 	UnownedFiles() []string
 
 	// ApplyApprovals marks the given approvers as satisfied
-	ApplyApprovals(approvers []string)
+	ApplyApprovals(approvers []Slug)
 }
 
 // New creates a new CodeOwners object from a root path and a list of diff files
-func New(root string, files []DiffFile, warningWriter io.Writer) (CodeOwners, error) {
+// If fileReader is nil, it will use the filesystem
+func New(root string, files []DiffFile, fileReader FileReader, warningWriter io.Writer) (CodeOwners, error) {
 	reviewerGroupManager := NewReviewerGroupMemo()
-	tree := initOwnerTreeNode(root, root, reviewerGroupManager, nil, warningWriter)
+	tree := initOwnerTreeNode(root, root, reviewerGroupManager, nil, fileReader, warningWriter)
 	tree.warningWriter = warningWriter
 	// TODO - support inline ownership rules (issue #3)
 	fileNames := f.Map(files, func(file DiffFile) string { return file.FileName })
@@ -52,12 +60,13 @@ type ownersMap struct {
 	unownedFiles    []string
 }
 
-func (om *ownersMap) SetAuthor(author string) {
-	for _, reviewers := range om.nameReviewerMap[author] {
-		// remove author from the reviewers list
-		reviewers.Names = f.RemoveValue(reviewers.Names, author)
-		if len(reviewers.Names) == 0 {
-			// mark the reviewer as approved if they are the author
+func (om *ownersMap) SetAuthor(author string, mode AuthorMode) {
+	authorSlug := NewSlug(author)
+	for _, reviewers := range om.nameReviewerMap[authorSlug.Normalized()] {
+		reviewers.Names = slices.DeleteFunc(reviewers.Names, func(name Slug) bool {
+			return name.Equals(authorSlug)
+		})
+		if len(reviewers.Names) == 0 || mode == AuthorModeSelfApproval {
 			reviewers.Approved = true
 		}
 	}
@@ -105,14 +114,11 @@ func (om *ownersMap) UnownedFiles() []string {
 }
 
 // Apply approver satisfaction to the owners map, and return the approvals which should be invalidated
-func (om *ownersMap) ApplyApprovals(approvers []string) {
-	applyApproved := func(user string) {
-		for _, reviewer := range om.nameReviewerMap[user] {
+func (om *ownersMap) ApplyApprovals(approvers []Slug) {
+	for _, user := range approvers {
+		for _, reviewer := range om.nameReviewerMap[user.Normalized()] {
 			reviewer.Approved = true
 		}
-	}
-	for _, user := range approvers {
-		applyApproved(user)
 	}
 }
 
@@ -125,6 +131,7 @@ type ownerTreeNode struct {
 	optionalReviewerTests   FileTestCases
 	fallback                *ReviewerGroup
 	warningWriter           io.Writer
+	fileReader              FileReader
 }
 
 func initOwnerTreeNode(
@@ -132,9 +139,10 @@ func initOwnerTreeNode(
 	path string,
 	reviewerGroupManager ReviewerGroupManager,
 	parent *ownerTreeNode,
+	fileReader FileReader,
 	warningWriter io.Writer,
 ) *ownerTreeNode {
-	rules := Read(path, reviewerGroupManager, warningWriter)
+	rules := Read(path, reviewerGroupManager, fileReader, warningWriter)
 	fallback := rules.Fallback
 	ownerTests := rules.OwnerTests
 	additionalReviewerTests := rules.AdditionalReviewerTests
@@ -154,6 +162,7 @@ func initOwnerTreeNode(
 		optionalReviewerTests:   optionalReviewerTests,
 		fallback:                fallback,
 		warningWriter:           io.Discard,
+		fileReader:              fileReader,
 	}
 }
 
@@ -172,7 +181,7 @@ func (tree *ownerTreeNode) BuildFromFiles(
 			currPath = currPath + "/" + part
 			partNode, ok := currNode.children[part]
 			if !ok {
-				partNode = initOwnerTreeNode(part, currPath, reviewerGroupManager, currNode, tree.warningWriter)
+				partNode = initOwnerTreeNode(part, currPath, reviewerGroupManager, currNode, tree.fileReader, tree.warningWriter)
 				currNode.children[part] = partNode
 			}
 			currNode = partNode
@@ -255,10 +264,11 @@ func (otfm ownerTestFileMap) getOwners(fileNames []string) (*ownersMap, error) {
 
 		for _, reviewer := range fileOwner.requiredReviewers {
 			for _, name := range reviewer.Names {
-				if v, ok := nameReviewerMap[name]; ok {
-					nameReviewerMap[name] = append(v, reviewer)
+				normalizedName := name.Normalized()
+				if v, ok := nameReviewerMap[normalizedName]; ok {
+					nameReviewerMap[normalizedName] = append(v, reviewer)
 				} else {
-					nameReviewerMap[name] = []*ReviewerGroup{reviewer}
+					nameReviewerMap[normalizedName] = []*ReviewerGroup{reviewer}
 				}
 			}
 		}

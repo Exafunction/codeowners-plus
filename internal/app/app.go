@@ -28,10 +28,10 @@ func NewOutputData(co codeowners.CodeOwners) *OutputData {
 	fileOwners := make(map[string][]string)
 	fileOptional := make(map[string][]string)
 	for file, reviewers := range co.FileRequired() {
-		fileOwners[file] = reviewers.Flatten()
+		fileOwners[file] = codeowners.OriginalStrings(reviewers.Flatten())
 	}
 	for file, reviewers := range co.FileOptional() {
-		fileOptional[file] = reviewers.Flatten()
+		fileOptional[file] = codeowners.OriginalStrings(reviewers.Flatten())
 	}
 	return &OutputData{
 		FileOwners:    fileOwners,
@@ -106,8 +106,13 @@ func (a *App) Run() (*OutputData, error) {
 	}
 	a.printDebug("PR: %d\n", a.client.PR().GetNumber())
 
-	// Read config
-	conf, err := owners.ReadConfig(a.config.RepoDir)
+	// Create file reader for base ref to prevent PR authors from modifying config or .codeowners
+	// This ensures the security policy comes from the protected branch, not the PR branch
+	baseFileReader := git.NewGitRefFileReader(a.client.PR().Base.GetSHA(), a.config.RepoDir)
+	a.printDebug("Using base ref %s for codeowners.toml and .codeowners files\n", a.client.PR().Base.GetSHA())
+
+	// Read config from base ref
+	conf, err := owners.ReadConfig(a.config.RepoDir, baseFileReader)
 	if err != nil {
 		a.printWarn("Error reading codeowners.toml - using default config\n")
 	}
@@ -130,19 +135,49 @@ func (a *App) Run() (*OutputData, error) {
 	a.gitDiff = gitDiff
 
 	// Initialize codeowners
-	codeOwners, err := codeowners.New(a.config.RepoDir, gitDiff.AllChanges(), a.config.WarningBuffer)
-	if err != nil {
-		return &OutputData{}, fmt.Errorf("NewCodeOwners Error: %v", err)
+	var codeOwners codeowners.CodeOwners
+	if conf.RequireBothBranchReviewers {
+		// Require both branch reviewers mode: read .codeowners from BOTH base and head, then merge
+		a.printDebug("Require both branch reviewers mode enabled - reading .codeowners from both base and head refs\n")
+
+		// Create base codeowners from base ref
+		baseCodeOwners, err := codeowners.New(a.config.RepoDir, gitDiff.AllChanges(), baseFileReader, a.config.WarningBuffer)
+		if err != nil {
+			return &OutputData{}, fmt.Errorf("NewCodeOwners (base) Error: %v", err)
+		}
+
+		// Create head file reader and codeowners from head ref
+		headFileReader := git.NewGitRefFileReader(a.client.PR().Head.GetSHA(), a.config.RepoDir)
+		headCodeOwners, err := codeowners.New(a.config.RepoDir, gitDiff.AllChanges(), headFileReader, a.config.WarningBuffer)
+		if err != nil {
+			return &OutputData{}, fmt.Errorf("NewCodeOwners (head) Error: %v", err)
+		}
+
+		// Merge base and head codeowners using AND logic
+		codeOwners = codeowners.MergeCodeOwners(baseCodeOwners, headCodeOwners)
+		a.printDebug("Merged ownership rules from base and head refs\n")
+	} else {
+		// Standard mode: read .codeowners only from base ref
+		codeOwners, err = codeowners.New(a.config.RepoDir, gitDiff.AllChanges(), baseFileReader, a.config.WarningBuffer)
+		if err != nil {
+			return &OutputData{}, fmt.Errorf("NewCodeOwners Error: %v", err)
+		}
 	}
 	a.codeowners = codeOwners
 
 	// Set author
 	author := fmt.Sprintf("@%s", a.client.PR().User.GetLogin())
-	codeOwners.SetAuthor(author)
+	authorMode := codeowners.AuthorModeDefault
+	if conf.AllowSelfApproval {
+		authorMode = codeowners.AuthorModeSelfApproval
+	}
+	codeOwners.SetAuthor(author, authorMode)
 
 	// Warn about unowned files
-	for _, uFile := range codeOwners.UnownedFiles() {
-		a.printWarn("WARNING: Unowned File: %s\n", uFile)
+	if !conf.SuppressUnownedWarning {
+		for _, uFile := range codeOwners.UnownedFiles() {
+			a.printWarn("WARNING: Unowned File: %s\n", uFile)
+		}
 	}
 
 	// Print file owners if verbose
@@ -168,17 +203,15 @@ func (a *App) processApprovalsAndReviewers() (bool, string, []string, error) {
 	// Get all required owners before filtering
 	allRequiredOwners := a.codeowners.AllRequired()
 	allRequiredOwnerNames := allRequiredOwners.Flatten()
-	a.printDebug("All Required Owners: %s\n", allRequiredOwnerNames)
+	a.printDebug("All Required Owners: %s\n", codeowners.OriginalStrings(allRequiredOwnerNames))
 
 	// Get optional reviewers
 	allOptionalReviewerNames := a.codeowners.AllOptional().Flatten()
-	allOptionalReviewerNames = f.Filtered(allOptionalReviewerNames, func(name string) bool {
-		return !slices.Contains(allRequiredOwnerNames, name)
-	})
-	a.printDebug("All Optional Reviewers: %s\n", allOptionalReviewerNames)
+	allOptionalReviewerNames = codeowners.FilterOutNames(allOptionalReviewerNames, allRequiredOwnerNames)
+	a.printDebug("All Optional Reviewers: %s\n", codeowners.OriginalStrings(allOptionalReviewerNames))
 
 	// Initialize user reviewer map
-	if err := a.client.InitUserReviewerMap(allRequiredOwnerNames); err != nil {
+	if err := a.client.InitUserReviewerMap(codeowners.OriginalStrings(allRequiredOwnerNames)); err != nil {
 		return false, message, nil, fmt.Errorf("InitUserReviewerMap Error: %v", err)
 	}
 
@@ -224,17 +257,27 @@ func (a *App) processApprovalsAndReviewers() (bool, string, []string, error) {
 	unapprovedOwners := a.codeowners.AllRequired()
 	maxReviewsMet := false
 	if a.Conf.MaxReviews != nil && *a.Conf.MaxReviews > 0 {
-		if validApprovalCount >= *a.Conf.MaxReviews && len(f.Intersection(unapprovedOwners.Flatten(), a.Conf.UnskippableReviewers)) == 0 {
+		unskippableReviewerSlugs := codeowners.NewSlugs(a.Conf.UnskippableReviewers)
+		if validApprovalCount >= *a.Conf.MaxReviews && !unapprovedOwners.ContainsAny(unskippableReviewerSlugs) {
 			maxReviewsMet = true
 		}
 	}
 
+	// Calculate min_reviews state for comment
+	// Show note when all codeowners approved but min_reviews threshold not met
+	minReviewsNeeded := 0
+	if a.Conf.MinReviews != nil && *a.Conf.MinReviews > 0 {
+		if validApprovalCount < *a.Conf.MinReviews && len(unapprovedOwners) == 0 {
+			minReviewsNeeded = *a.Conf.MinReviews
+		}
+	}
+
 	// Add comments to the PR if necessary
-	err = a.addReviewStatusComment(allRequiredOwners, maxReviewsMet)
+	err = a.addReviewStatusComment(allRequiredOwners, maxReviewsMet, minReviewsNeeded, validApprovalCount)
 	if err != nil {
 		return false, message, nil, fmt.Errorf("failed to add review status comment: %w", err)
 	}
-	err = a.addOptionalCcComment(allOptionalReviewerNames)
+	err = a.addOptionalCcComment(codeowners.OriginalStrings(allOptionalReviewerNames))
 	if err != nil {
 		return false, message, nil, fmt.Errorf("failed to add optional CC comment: %w", err)
 	}
@@ -255,13 +298,14 @@ func (a *App) processApprovalsAndReviewers() (bool, string, []string, error) {
 	}
 
 	// Collect still required data
-	stillRequired := unapprovedOwners.Flatten()
+	stillRequiredSlugs := unapprovedOwners.Flatten()
+	stillRequired := codeowners.OriginalStrings(stillRequiredSlugs)
 
 	// Exit if there are any unapproved codeowner teams
 	if len(unapprovedOwners) > 0 && !maxReviewsMet {
 		// Return failed status if any codeowner team has not approved the PR
 		unapprovedCommentString := unapprovedOwners.ToCommentString(false)
-		if a.Conf.Enforcement.Approval && tokenOwnerApproval != nil {
+		if a.Conf.Enforcement.Approval && tokenOwnerApproval != nil && !a.Conf.DisableSmartDismissal {
 			_ = a.client.DismissStaleReviews([]*gh.CurrentApproval{tokenOwnerApproval})
 		}
 		message = fmt.Sprintf(
@@ -273,6 +317,31 @@ func (a *App) processApprovalsAndReviewers() (bool, string, []string, error) {
 
 	// Exit if there are not enough reviews
 	if a.Conf.MinReviews != nil && *a.Conf.MinReviews > 0 {
+		// Check if we need to re-request from a satisfied team when min_reviews is not met
+		// Handles the case when there min_reviews is higher than the number of teams required.
+		if minReviewsNeeded > 0 {
+			// All required teams have approved, but we need more reviews
+			// Re-request review from the satisfied team(s)
+			currentlyRequestedOwners, err := a.client.GetCurrentlyRequested()
+			if err != nil {
+				a.printWarn("WARNING: Error getting currently requested owners for re-request: %v\n", err)
+			} else {
+				currentlyRequestedSet := make(map[string]struct{}, len(currentlyRequestedOwners))
+				for _, owner := range currentlyRequestedOwners {
+					currentlyRequestedSet[owner.Normalized()] = struct{}{}
+				}
+				ownersToReRequest := f.Filtered(allRequiredOwnerNames, func(owner codeowners.Slug) bool {
+					_, exists := currentlyRequestedSet[owner.Normalized()]
+					return !exists
+				})
+				if len(ownersToReRequest) > 0 {
+					a.printDebug("Re-requesting Reviews from satisfied team(s) to meet min_reviews: %s\n", codeowners.OriginalStrings(ownersToReRequest))
+					if err := a.client.RequestReviewers(codeowners.OriginalStrings(ownersToReRequest)); err != nil {
+						a.printWarn("WARNING: Error re-requesting reviewers: %v\n", err)
+					}
+				}
+			}
+		}
 		if validApprovalCount < *a.Conf.MinReviews {
 			message = fmt.Sprintf("FAIL: Min Reviews not satisfied. Need %d, found %d", *a.Conf.MinReviews, validApprovalCount)
 			return false, message, stillRequired, nil
@@ -291,7 +360,7 @@ func (a *App) processApprovalsAndReviewers() (bool, string, []string, error) {
 	return true, message, stillRequired, nil
 }
 
-func (a *App) addReviewStatusComment(allRequiredOwners codeowners.ReviewerGroups, maxReviewsMet bool) error {
+func (a *App) addReviewStatusComment(allRequiredOwners codeowners.ReviewerGroups, maxReviewsMet bool, minReviewsNeeded int, currentApprovals int) error {
 	// Comment on the PR with the codeowner teams required for review
 
 	if a.config.Quiet {
@@ -312,6 +381,19 @@ func (a *App) addReviewStatusComment(allRequiredOwners codeowners.ReviewerGroups
 
 	if maxReviewsMet {
 		comment += "\n\nThe PR has received the max number of required reviews. No further action is required."
+	}
+
+	if minReviewsNeeded > 0 {
+		approvalText := "approval"
+		if minReviewsNeeded-currentApprovals > 1 {
+			approvalText = "approvals"
+		}
+		comment += fmt.Sprintf(
+			"\n\nMinimum review requirement not met. Need %d reviews, found %d. Reviews have been re-requested from owning teams, but any additional %s can satisfy minimum.",
+			minReviewsNeeded,
+			currentApprovals,
+			approvalText,
+		)
 	}
 
 	if a.Conf.DetailedReviewers {
@@ -401,8 +483,26 @@ func (a *App) processTokenOwnerApproval() (*gh.CurrentApproval, error) {
 }
 
 func (a *App) processApprovals(ghApprovals []*gh.CurrentApproval) (int, error) {
-	fileReviewers := f.MapMap(a.codeowners.FileRequired(), func(reviewers codeowners.ReviewerGroups) []string { return reviewers.Flatten() })
-	approvers, approvalsToDismiss := a.client.CheckApprovals(fileReviewers, ghApprovals, a.gitDiff)
+	// Create file reviewer map with normalized names for case-insensitive comparison
+	fileReviewers := f.MapMap(a.codeowners.FileRequired(), func(reviewers codeowners.ReviewerGroups) []string {
+		return codeowners.NormalizedStrings(reviewers.Flatten())
+	})
+
+	var approvers []codeowners.Slug
+	var approvalsToDismiss []*gh.CurrentApproval
+
+	if a.Conf.DisableSmartDismissal {
+		// Smart dismissal is disabled - treat all approvals as valid
+		a.printDebug("Smart dismissal disabled - keeping all approvals\n")
+		for _, approval := range ghApprovals {
+			approvers = append(approvers, approval.Reviewers...)
+		}
+		approvalsToDismiss = []*gh.CurrentApproval{}
+	} else {
+		// Normal smart dismissal logic
+		approvers, approvalsToDismiss = a.client.CheckApprovals(fileReviewers, ghApprovals, a.gitDiff)
+	}
+
 	a.codeowners.ApplyApprovals(approvers)
 
 	if len(approvalsToDismiss) > 0 {
@@ -422,27 +522,27 @@ func (a *App) requestReviews() error {
 
 	unapprovedOwners := a.codeowners.AllRequired()
 	unapprovedOwnerNames := unapprovedOwners.Flatten()
-	a.printDebug("Remaining Required Owners: %s\n", unapprovedOwnerNames)
+	a.printDebug("Remaining Required Owners: %s\n", codeowners.OriginalStrings(unapprovedOwnerNames))
 
 	currentlyRequestedOwners, err := a.client.GetCurrentlyRequested()
 	if err != nil {
 		return fmt.Errorf("GetCurrentlyRequested Error: %v", err)
 	}
-	a.printDebug("Currently Requested Owners: %s\n", currentlyRequestedOwners)
+	a.printDebug("Currently Requested Owners: %s\n", codeowners.OriginalStrings(currentlyRequestedOwners))
 
 	previousReviewers, err := a.client.GetAlreadyReviewed()
 	if err != nil {
 		return fmt.Errorf("GetAlreadyReviewed Error: %v", err)
 	}
-	a.printDebug("Already Reviewed Owners: %s\n", previousReviewers)
+	a.printDebug("Already Reviewed Owners: %s\n", codeowners.OriginalStrings(previousReviewers))
 
 	filteredOwners := unapprovedOwners.FilterOut(currentlyRequestedOwners...)
 	filteredOwners = filteredOwners.FilterOut(previousReviewers...)
 	filteredOwnerNames := filteredOwners.Flatten()
 
 	if len(filteredOwners) > 0 {
-		a.printDebug("Requesting Reviews from: %s\n", filteredOwnerNames)
-		if err := a.client.RequestReviewers(filteredOwnerNames); err != nil {
+		a.printDebug("Requesting Reviews from: %s\n", codeowners.OriginalStrings(filteredOwnerNames))
+		if err := a.client.RequestReviewers(codeowners.OriginalStrings(filteredOwnerNames)); err != nil {
 			return fmt.Errorf("RequestReviewers Error: %v", err)
 		}
 	}
@@ -469,7 +569,7 @@ func (a *App) getFileOwnersMapToString(fileReviewers map[string]codeowners.Revie
 	for _, file := range files {
 		reviewers := fileReviewers[file]
 		// builder.WriteString error return is always nil
-		_, _ = fmt.Fprintf(&builder, "- %s: %+v\n", file, reviewers.Flatten())
+		_, _ = fmt.Fprintf(&builder, "- %s: %+v\n", file, codeowners.OriginalStrings(reviewers.Flatten()))
 	}
 	return builder.String()
 }
