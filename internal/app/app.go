@@ -51,14 +51,20 @@ func (od *OutputData) UpdateOutputData(success bool, message string, stillRequir
 
 // Config holds the application configuration
 type Config struct {
-	Token         string
-	RepoDir       string
-	PR            int
-	Repo          string
-	Verbose       bool
-	Quiet         bool
-	InfoBuffer    io.Writer
-	WarningBuffer io.Writer
+	Token   string
+	RepoDir string
+	PR      int
+	Repo    string
+	Verbose bool
+	Quiet   bool
+	// TrustedConfigRef, when set, is the git ref that codeowners.toml and
+	// .codeowners files are read from instead of the PR base. Use it when PRs
+	// can target unprotected branches (e.g. stacked PRs, whose base is the
+	// unmerged branch below them) so the security policy always comes from a
+	// protected branch.
+	TrustedConfigRef string
+	InfoBuffer       io.Writer
+	WarningBuffer    io.Writer
 }
 
 // App represents the application with its dependencies
@@ -106,10 +112,17 @@ func (a *App) Run() (*OutputData, error) {
 	}
 	a.printDebug("PR: %d\n", a.client.PR().GetNumber())
 
-	// Create file reader for base ref to prevent PR authors from modifying config or .codeowners
-	// This ensures the security policy comes from the protected branch, not the PR branch
-	baseFileReader := git.NewGitRefFileReader(a.client.PR().Base.GetSHA(), a.config.RepoDir)
-	a.printDebug("Using base ref %s for codeowners.toml and .codeowners files\n", a.client.PR().Base.GetSHA())
+	// Create file reader for the config ref to prevent PR authors from modifying config or .codeowners
+	// This ensures the security policy comes from a protected branch, not the PR branch.
+	// The PR base is only trustworthy when PRs target protected branches; for
+	// PRs that can target unprotected branches (e.g. stacked PRs, whose base is
+	// the unmerged branch below them), trusted-config-ref pins the policy source.
+	configRef := a.client.PR().Base.GetSHA()
+	if a.config.TrustedConfigRef != "" {
+		configRef = a.config.TrustedConfigRef
+	}
+	baseFileReader := git.NewGitRefFileReader(configRef, a.config.RepoDir)
+	a.printDebug("Using ref %s for codeowners.toml and .codeowners files\n", configRef)
 
 	// Read config from base ref
 	conf, err := owners.ReadConfig(a.config.RepoDir, baseFileReader)

@@ -23,6 +23,15 @@ inputs:
     description: 'Disable PR comments and review requests'
     required: false
     default: false
+  trusted-config-ref:
+    description: >-
+      Git ref to read codeowners.toml and .codeowners files from instead of the
+      PR base (e.g. `refs/remotes/origin/main`). Set this when PRs can target
+      unprotected branches — such as stacked PRs, whose base is the unmerged
+      branch below them — so the ownership policy always comes from a protected
+      branch. The ref must be fetched before running the action.
+    required: false
+    default: ''
 
 outputs:
   data:
