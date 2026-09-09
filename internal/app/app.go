@@ -248,6 +248,12 @@ func (a *App) processApprovalsAndReviewers() (bool, string, []string, error) {
 		return false, message, nil, err
 	}
 
+	requiredBeforeSignoffs := len(a.codeowners.AllRequired())
+	if err := a.processOwnerSignoffs(); err != nil {
+		return false, message, nil, err
+	}
+	usedOwnerSignoff := len(a.codeowners.AllRequired()) < requiredBeforeSignoffs
+
 	// Request reviews from required owners
 	err = a.requestReviews()
 	if err != nil {
@@ -349,7 +355,7 @@ func (a *App) processApprovalsAndReviewers() (bool, string, []string, error) {
 	}
 
 	message = "Codeowners reviews satisfied"
-	if a.Conf.Enforcement.Approval && tokenOwnerApproval == nil {
+	if a.Conf.Enforcement.Approval && tokenOwnerApproval == nil && !usedOwnerSignoff {
 		// Approve the PR since all codeowner teams have approved
 		err = a.client.ApprovePR()
 		if err != nil {
@@ -513,6 +519,37 @@ func (a *App) processApprovals(ghApprovals []*gh.CurrentApproval) (int, error) {
 	}
 
 	return len(ghApprovals) - len(approvalsToDismiss), nil
+}
+
+func (a *App) processOwnerSignoffs() error {
+	signoffs, err := a.client.GetCurrentOwnerSignoffs()
+	if err != nil {
+		return fmt.Errorf("GetCurrentOwnerSignoffs Error: %v", err)
+	}
+	if len(signoffs) == 0 {
+		return nil
+	}
+	var approvers []codeowners.Slug
+	var stale []*gh.CurrentApproval
+	if a.Conf.DisableSmartDismissal {
+		for _, signoff := range signoffs {
+			approvers = append(approvers, signoff.Reviewers...)
+		}
+	} else {
+		fileReviewers := f.MapMap(a.codeowners.FileRequired(), func(reviewers codeowners.ReviewerGroups) []string {
+			return codeowners.NormalizedStrings(reviewers.Flatten())
+		})
+		approvers, stale = a.client.CheckApprovals(fileReviewers, signoffs, a.gitDiff)
+	}
+	for _, signoff := range signoffs {
+		if !slices.Contains(stale, signoff) {
+			a.printDebug("Owner signoff: %s (review %d, commit %s) satisfies %s\n",
+				signoff.GHLogin.Original(), signoff.ReviewID, signoff.CommitID, codeowners.OriginalStrings(signoff.Reviewers))
+		}
+	}
+	a.printDebug("Stale owner signoffs (ignored): %+v\n", stale)
+	a.codeowners.ApplyApprovals(approvers)
+	return nil
 }
 
 func (a *App) requestReviews() error {

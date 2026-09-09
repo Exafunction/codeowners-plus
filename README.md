@@ -4,7 +4,7 @@ Code Ownership &amp; Review Assignment Tool - GitHub CODEOWNERS but better
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/multimediallc/codeowners-plus)](https://goreportcard.com/report/github.com/multimediallc/codeowners-plus?kill_cache=1)
 [![Tests](https://github.com/multimediallc/codeowners-plus/actions/workflows/go.yml/badge.svg)](https://github.com/multimediallc/codeowners-plus/actions/workflows/go.yml)
-![Coverage](https://img.shields.io/badge/Coverage-83.0%25-brightgreen)
+![Coverage](https://img.shields.io/badge/Coverage-84.3%25-brightgreen)
 [![License](https://img.shields.io/badge/License-BSD%203--Clause-blue.svg)](https://opensource.org/licenses/BSD-3-Clause)
 [![Contributor Covenant](https://img.shields.io/badge/Contributor%20Covenant-2.1-4baaaa.svg)](CODE_OF_CONDUCT.md)
 
@@ -112,6 +112,41 @@ It is recommended to also set up a rerun workflow on `pull_request_review` to re
 ### GitHub Teams Support
 
 If you plan to have organization teams as code owners, you will need to use a PAT that has organization [read access for Members and Administration](https://docs.github.com/en/rest/authentication/permissions-required-for-fine-grained-personal-access-tokens) as the token. If you do not have organization teams as owners, [GITHUB_TOKEN](https://docs.github.com/en/actions/security-for-github-actions/security-guides/automatic-token-authentication#using-the-github_token-in-a-workflow) should be sufficient.
+
+### Owner-only signoff
+
+To satisfy ownership requirements without approving the pull request, submit a
+GitHub **Comment** review whose body includes this standalone line:
+
+```text
+codeowners-approved
+```
+
+The signer satisfies every required owner group their user or team membership
+can satisfy under the existing `.codeowners` rules. This does not create an
+`APPROVED` review, count toward `min_reviews` or `max_reviews`, or cause
+`enforcement.approval` to approve a PR whose ownership depends on the signoff.
+Ordinary approving reviews continue to satisfy ownership and review counts.
+PR-author handling remains controlled by `allow_self_approval`.
+
+Recognition is case-insensitive and allows up to three leading spaces and
+trailing spaces/tabs. Prose, inline backticks, blockquotes, list items, indented
+code, and backtick/tilde fenced code do not count. Leave a blank line after a
+quote, list, or HTML paragraph before writing the directive.
+
+Unrelated later comments preserve a signoff. Editing a review to remove or
+invalidate its directive withdraws that review's signoff; any other valid
+signoff reviews remain effective. A later **Request changes** or dismissed
+review supersedes earlier signoffs by that reviewer. A new Comment review can
+sign off again. Signoffs survive pushes with `disable_smart_dismissal = true`;
+otherwise, changes to the signer's owned files invalidate them using the same
+diff checks as ordinary approvals. Stale Comment reviews are ignored rather
+than dismissed through GitHub.
+
+Integrations must rerun Codeowners Plus on review submission, dismissal, and
+body edits adding or removing a valid directive. The parser compatibility
+fixtures are in `pkg/directives/testdata/codeowners_approved.json`; webhook
+receivers should validate against those same cases.
 
 ## Configuration
 
