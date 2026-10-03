@@ -80,16 +80,17 @@ func HasCodeownersApproval(body string) bool {
 		if containerLine.MatchString(line) {
 			blockedParagraph = true
 		}
-		if blockedParagraph {
-			continue
-		}
 		if line[0] == '`' || line[0] == '~' {
 			run := len(line) - len(strings.TrimLeft(line, line[:1]))
 			if run >= 3 && (line[0] == '~' || !strings.Contains(line[run:], "`")) {
 				fence = line[0]
 				fenceLength = run
+				blockedParagraph = false
 				continue
 			}
+		}
+		if blockedParagraph {
+			continue
 		}
 		if lower == "codeowners-approved" {
 			return true
