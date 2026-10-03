@@ -38,6 +38,7 @@ type Client interface {
 	AllApprovals() ([]*CurrentApproval, error)
 	FindUserApproval(ghUser string) (*CurrentApproval, error)
 	GetCurrentReviewerApprovals() ([]*CurrentApproval, error)
+	GetCurrentOwnerSignoffs() ([]*CurrentApproval, error)
 	GetAlreadyReviewed() ([]codeowners.Slug, error)
 	GetCurrentlyRequested() ([]codeowners.Slug, error)
 	DismissStaleReviews(staleApprovals []*CurrentApproval) error
