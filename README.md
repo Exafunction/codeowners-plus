@@ -4,7 +4,7 @@ Code Ownership &amp; Review Assignment Tool - GitHub CODEOWNERS but better
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/multimediallc/codeowners-plus)](https://goreportcard.com/report/github.com/multimediallc/codeowners-plus?kill_cache=1)
 [![Tests](https://github.com/multimediallc/codeowners-plus/actions/workflows/go.yml/badge.svg)](https://github.com/multimediallc/codeowners-plus/actions/workflows/go.yml)
-![Coverage](https://img.shields.io/badge/Coverage-84.3%25-brightgreen)
+![Coverage](https://img.shields.io/badge/Coverage-84.5%25-brightgreen)
 [![License](https://img.shields.io/badge/License-BSD%203--Clause-blue.svg)](https://opensource.org/licenses/BSD-3-Clause)
 [![Contributor Covenant](https://img.shields.io/badge/Contributor%20Covenant-2.1-4baaaa.svg)](CODE_OF_CONDUCT.md)
 
@@ -132,7 +132,8 @@ PR-author handling remains controlled by `allow_self_approval`.
 Recognition is case-insensitive and allows up to three leading spaces and
 trailing spaces/tabs. Prose, inline backticks, blockquotes, list items, indented
 code, and backtick/tilde fenced code do not count. Leave a blank line after a
-quote, list, or HTML paragraph before writing the directive.
+quote, list, or HTML paragraph before writing the directive. After a list,
+the directive must also be less indented than the list item's content.
 
 Unrelated later comments preserve a signoff. Editing a review to remove or
 invalidate its directive withdraws that review's signoff; any other valid

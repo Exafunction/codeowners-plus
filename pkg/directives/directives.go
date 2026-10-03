@@ -6,6 +6,7 @@ import (
 )
 
 var containerLine = regexp.MustCompile(`^(>|[-+*][ \t]|[0-9]+[.)][ \t]|<)`)
+var listLine = regexp.MustCompile(`^( {0,3}(?:[-+*]|[0-9]{1,9}[.)]))([ \t]+|$)`)
 var indentedLine = regexp.MustCompile(`^( {4}| {0,3}\t)`)
 var htmlCodeBlock = regexp.MustCompile(`^<(pre|script|style|textarea)([ \t>]|$)`)
 
@@ -15,6 +16,7 @@ func HasCodeownersApproval(body string) bool {
 	var fence byte
 	fenceLength := 0
 	blockedParagraph := false
+	listIndent := 0
 	inComment := false
 	htmlEnd := ""
 	for _, raw := range strings.Split(strings.ReplaceAll(body, "\r\n", "\n"), "\n") {
@@ -49,7 +51,31 @@ func HasCodeownersApproval(body string) bool {
 			continue
 		}
 		if indentedLine.MatchString(raw) {
+			if listIndent > 0 {
+				blockedParagraph = true
+			}
 			continue
+		}
+		if listIndent > 0 {
+			if len(raw)-len(strings.TrimLeft(raw, " ")) >= listIndent {
+				blockedParagraph = true
+				continue
+			}
+			listIndent = 0
+		}
+		if match := listLine.FindStringSubmatch(raw); match != nil {
+			listIndent = len(match[1])
+			for _, char := range match[2] {
+				if char == '\t' {
+					listIndent += 4 - listIndent%4
+				} else {
+					listIndent++
+				}
+			}
+			if listIndent == len(match[1]) || listIndent-len(match[1]) > 4 || len(match[0]) == len(raw) {
+				listIndent = len(match[1]) + 1
+			}
+			blockedParagraph = true
 		}
 		if containerLine.MatchString(line) {
 			blockedParagraph = true
