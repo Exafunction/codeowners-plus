@@ -122,6 +122,11 @@ func (a *App) Run() (*OutputData, error) {
 		configRef = a.config.TrustedConfigRef
 	}
 	baseFileReader := git.NewGitRefFileReader(configRef, a.config.RepoDir)
+	if a.config.TrustedConfigRef != "" {
+		if err := baseFileReader.Verify(); err != nil {
+			return &OutputData{}, fmt.Errorf("trusted-config-ref Error: %v", err)
+		}
+	}
 	a.printDebug("Using ref %s for codeowners.toml and .codeowners files\n", configRef)
 
 	// Read config from base ref
