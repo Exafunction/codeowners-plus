@@ -15,22 +15,24 @@ import (
 
 // Flags holds the command line flags
 type Flags struct {
-	Token   *string
-	RepoDir *string
-	PR      *int
-	Repo    *string
-	Verbose *bool
-	Quiet   *bool
+	Token            *string
+	RepoDir          *string
+	PR               *int
+	Repo             *string
+	Verbose          *bool
+	Quiet            *bool
+	TrustedConfigRef *string
 }
 
 var (
 	flags = &Flags{
-		Token:   flag.String("token", getEnv("INPUT_GITHUB-TOKEN", ""), "GitHub authentication token"),
-		RepoDir: flag.String("dir", getEnv("GITHUB_WORKSPACE", "/"), "Path to local Git repo"),
-		PR:      flag.Int("pr", ignoreError(strconv.Atoi(getEnv("INPUT_PR", ""))), "Pull Request number"),
-		Repo:    flag.String("repo", getEnv("INPUT_REPOSITORY", ""), "GitHub repo name"),
-		Verbose: flag.Bool("v", ignoreError(strconv.ParseBool(getEnv("INPUT_VERBOSE", "0"))), "Verbose output"),
-		Quiet:   flag.Bool("quiet", ignoreError(strconv.ParseBool(getEnv("INPUT_QUIET", "0"))), "Disable PR comments and review requests"),
+		Token:            flag.String("token", getEnv("INPUT_GITHUB-TOKEN", ""), "GitHub authentication token"),
+		RepoDir:          flag.String("dir", getEnv("GITHUB_WORKSPACE", "/"), "Path to local Git repo"),
+		PR:               flag.Int("pr", ignoreError(strconv.Atoi(getEnv("INPUT_PR", ""))), "Pull Request number"),
+		Repo:             flag.String("repo", getEnv("INPUT_REPOSITORY", ""), "GitHub repo name"),
+		Verbose:          flag.Bool("v", ignoreError(strconv.ParseBool(getEnv("INPUT_VERBOSE", "0"))), "Verbose output"),
+		Quiet:            flag.Bool("quiet", ignoreError(strconv.ParseBool(getEnv("INPUT_QUIET", "0"))), "Disable PR comments and review requests"),
+		TrustedConfigRef: flag.String("trusted-config-ref", getEnv("INPUT_TRUSTED-CONFIG-REF", ""), "Git ref to read codeowners.toml and .codeowners files from instead of the PR base"),
 	}
 	WarningBuffer = bytes.NewBuffer([]byte{})
 	InfoBuffer    = bytes.NewBuffer([]byte{})
@@ -126,14 +128,15 @@ func main() {
 	}
 
 	cfg := app.Config{
-		Token:         *flags.Token,
-		RepoDir:       *flags.RepoDir,
-		PR:            *flags.PR,
-		Repo:          *flags.Repo,
-		Verbose:       *flags.Verbose,
-		Quiet:         *flags.Quiet,
-		InfoBuffer:    InfoBuffer,
-		WarningBuffer: WarningBuffer,
+		Token:            *flags.Token,
+		RepoDir:          *flags.RepoDir,
+		PR:               *flags.PR,
+		Repo:             *flags.Repo,
+		Verbose:          *flags.Verbose,
+		Quiet:            *flags.Quiet,
+		TrustedConfigRef: *flags.TrustedConfigRef,
+		InfoBuffer:       InfoBuffer,
+		WarningBuffer:    WarningBuffer,
 	}
 
 	app, err := app.New(cfg)

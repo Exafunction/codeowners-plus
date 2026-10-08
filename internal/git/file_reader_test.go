@@ -157,3 +157,24 @@ func TestGitRefFileReader_PathExists(t *testing.T) {
 		})
 	}
 }
+
+func TestGitRefFileReader_Verify(t *testing.T) {
+	mockExec := &mockFileReaderExecutor{
+		outputs: map[string][]byte{
+			"git rev-parse --verify --quiet refs/remotes/origin/main^{commit}": []byte("abc123\n"),
+		},
+		errors: map[string]error{
+			"git rev-parse --verify --quiet refs/remotes/origin/typo^{commit}": fmt.Errorf("exit status 1"),
+		},
+	}
+
+	fetched := &GitRefFileReader{ref: "refs/remotes/origin/main", dir: "/repo", executor: mockExec}
+	if err := fetched.Verify(); err != nil {
+		t.Errorf("expected a fetched ref to verify, got: %v", err)
+	}
+
+	missing := &GitRefFileReader{ref: "refs/remotes/origin/typo", dir: "/repo", executor: mockExec}
+	if err := missing.Verify(); err == nil {
+		t.Error("expected an unresolvable ref to fail verification")
+	}
+}
