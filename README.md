@@ -316,6 +316,7 @@ To trigger the admin bypass feature, **Create an approval review containing "Cod
 - Repository administrators manually approving the PR with "Codeowners Bypass" in their review comment
 - Users listed in `allowed_users` manually approving with the bypass text
 - Automated workflows that create approval reviews with the bypass text on behalf of authorized users
+- The PR author, when they are a repository administrator or listed in `allowed_users`: GitHub does not let an author approve their own PR, so the author leaves a **comment review** (not a PR comment) with the bypass text, e.g. `gh pr review <pr> --comment --body "Codeowners Bypass"`. The author's review still never counts as a codeowner approval.
 
 Codeowners Plus automatically detects and validates the bypass approval, immediately marking the PR as passing all codeowner requirements.
 

@@ -1407,6 +1407,7 @@ func TestContainsValidBypassApproval(t *testing.T) {
 
 			gh.pr = &github.PullRequest{Number: github.Int(123)}
 			gh.reviews = tc.reviews
+			gh.allReviews = tc.reviews
 
 			// Mock the admin permission check
 			for _, adminUser := range tc.adminUsers {
@@ -1458,6 +1459,52 @@ func TestContainsValidBypassApproval(t *testing.T) {
 				t.Errorf("expected %v, got %v", tc.expected, result)
 			}
 		})
+	}
+}
+
+// A PR author cannot approve their own PR on GitHub, so an allowed author
+// bypasses with a comment review. InitReviews drops the author's reviews from
+// the approval set; the bypass check must still see them.
+func TestContainsValidBypassApprovalByAuthor(t *testing.T) {
+	mux, server, gh := mockServerAndClient(t)
+	defer server.Close()
+
+	gh.pr = &github.PullRequest{Number: github.Int(123), User: &github.User{Login: github.String("author")}}
+	mockReviews := []*github.PullRequestReview{
+		{User: &github.User{Login: github.String("author")}, ID: github.Int64(1), State: github.String("COMMENTED"), Body: github.String("Codeowners Bypass")},
+	}
+	mux.HandleFunc("/repos/test-owner/test-repo/pulls/123/reviews", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(mockReviews)
+	})
+
+	result, err := gh.ContainsValidBypassApproval([]string{"author"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result {
+		t.Error("expected the author's bypass review to count, got false")
+	}
+
+	approvals, err := gh.AllApprovals()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(approvals) != 0 {
+		t.Errorf("expected the author's review not to count as an approval, got %d", len(approvals))
+	}
+
+	// An author who is neither allowed nor an admin still cannot bypass.
+	mux.HandleFunc("/repos/test-owner/test-repo/collaborators/author/permission", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"permission": "write"})
+	})
+	result, err = gh.ContainsValidBypassApproval([]string{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result {
+		t.Error("expected a non-allowed author's bypass review not to count, got true")
 	}
 }
 
