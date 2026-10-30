@@ -991,6 +991,19 @@ func TestProcessApprovalsAndReviewers(t *testing.T) {
 			expectSuccess:     true,
 			expectedApprovals: codeowners.NewSlugs([]string{"@user1", "@user2"}),
 		},
+		{
+			// admin_bypass.enabled = false must ignore a bypass review (README contract).
+			name: "admin bypass disabled ignores bypass review",
+			requiredOwners: codeowners.ReviewerGroups{
+				&codeowners.ReviewerGroup{Names: codeowners.NewSlugs([]string{"@user1"})},
+			},
+			currentApprovals: []*gh.CurrentApproval{
+				{GHLogin: codeowners.NewSlug("admin-user"), ReviewID: 999, Reviewers: codeowners.NewSlugs([]string{})},
+			},
+			expectError:       false,
+			expectSuccess:     false,
+			expectedApprovals: codeowners.NewSlugs([]string{}),
+		},
 	}
 
 	for _, tc := range tt {

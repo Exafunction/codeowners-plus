@@ -221,14 +221,13 @@ func (a *App) processApprovalsAndReviewers() (bool, string, []string, error) {
 		return false, message, nil, fmt.Errorf("GetCurrentApprovals Error: %v", err)
 	}
 
-	// Check for bypass approvals
-	var allowedBypassUsers []string
+	// Check for bypass approvals (only when admin_bypass.enabled)
+	hasValidBypass := false
 	if a.Conf.AdminBypass != nil && a.Conf.AdminBypass.Enabled {
-		allowedBypassUsers = a.Conf.AdminBypass.AllowedUsers
-	}
-	hasValidBypass, err := a.client.ContainsValidBypassApproval(allowedBypassUsers)
-	if err != nil {
-		return false, message, nil, fmt.Errorf("ContainsValidBypassApproval Error: %v", err)
+		hasValidBypass, err = a.client.ContainsValidBypassApproval(a.Conf.AdminBypass.AllowedUsers)
+		if err != nil {
+			return false, message, nil, fmt.Errorf("ContainsValidBypassApproval Error: %v", err)
+		}
 	}
 
 	a.printDebug("Current Approvals: %+v\n", ghApprovals)

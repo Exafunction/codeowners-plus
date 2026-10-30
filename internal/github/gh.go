@@ -64,8 +64,10 @@ type GHClient struct {
 	userReviewerMap ghUserReviewerMap
 	comments        []*github.IssueComment
 	reviews         []*github.PullRequestReview
-	warningBuffer   io.Writer
-	infoBuffer      io.Writer
+	// allReviews keeps the PR author's reviews too; only the bypass check reads it.
+	allReviews    []*github.PullRequestReview
+	warningBuffer io.Writer
+	infoBuffer    io.Writer
 }
 
 func NewClient(owner, repo, token string) Client {
@@ -75,6 +77,7 @@ func NewClient(owner, repo, token string) Client {
 		owner,
 		repo,
 		client,
+		nil,
 		nil,
 		nil,
 		nil,
@@ -160,12 +163,12 @@ func (gh *GHClient) InitReviews() error {
 	if err != nil {
 		return err
 	}
-	allReviews = f.Filtered(allReviews, func(review *github.PullRequestReview) bool {
-		return review.User.GetLogin() != gh.pr.User.GetLogin()
-	})
 	// use descending chronological order (default ascending)
 	slices.Reverse(allReviews)
-	gh.reviews = allReviews
+	gh.allReviews = allReviews
+	gh.reviews = f.Filtered(allReviews, func(review *github.PullRequestReview) bool {
+		return review.User.GetLogin() != gh.pr.User.GetLogin()
+	})
 	return nil
 }
 
@@ -184,19 +187,21 @@ func (gh *GHClient) approvals() []*github.PullRequestReview {
 	return approvals
 }
 
-// ContainsValidBypassApproval checks if any approval is a valid admin bypass approval
+// ContainsValidBypassApproval checks if any review is a valid admin bypass.
+// The PR author's reviews count too: GitHub rejects an author's approval, so an
+// author in allowed_users (or a repository admin) bypasses with a comment review.
 func (gh *GHClient) ContainsValidBypassApproval(allowedUsers []string) (bool, error) {
 	if gh.pr == nil {
 		return false, &NoPRError{}
 	}
-	if gh.reviews == nil {
+	if gh.allReviews == nil {
 		err := gh.InitReviews()
 		if err != nil {
 			return false, err
 		}
 	}
 
-	for _, review := range gh.reviews {
+	for _, review := range gh.allReviews {
 		// Check if the review body contains bypass text
 		body := review.GetBody()
 		if !strings.Contains(strings.ToLower(body), "codeowners bypass") {
