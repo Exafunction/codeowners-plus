@@ -21,6 +21,16 @@ func NewGitRefFileReader(ref string, dir string) *GitRefFileReader {
 	}
 }
 
+// Verify reports an error unless the ref resolves to a commit in the local
+// repository. ReadFile and PathExists cannot tell a missing ref from a missing
+// file, so an unresolvable ref would otherwise read as "no ownership rules".
+func (r *GitRefFileReader) Verify() error {
+	if _, err := r.executor.execute("git", "rev-parse", "--verify", "--quiet", r.ref+"^{commit}"); err != nil {
+		return fmt.Errorf("ref %s does not resolve to a commit: %w", r.ref, err)
+	}
+	return nil
+}
+
 // ReadFile reads a file from the git ref
 func (r *GitRefFileReader) ReadFile(path string) ([]byte, error) {
 	// Normalize path - make it relative to the repository root
