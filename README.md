@@ -243,6 +243,7 @@ suppress_unowned_warning = true
 
 # `allow_self_approval` (default false) treats the PR author as satisfying any OR ownership group they belong to
 # If the PR author is included an OR group (e.g. `*.py @alice @bob`), the group is auto-satisfied without requiring another member to approve
+# This includes groups that list a team the author is a member of (e.g. `*.py @org/backend`)
 allow_self_approval = false
 
 # `enforcement` allows you to specify how the Codeowners Plus check should be enforced

@@ -502,6 +502,11 @@ func (a *App) processApprovals(ghApprovals []*gh.CurrentApproval) (int, error) {
 		approvers, approvalsToDismiss = a.client.CheckApprovals(fileReviewers, ghApprovals, a.gitDiff)
 	}
 
+	if a.Conf.AllowSelfApproval {
+		// SetAuthor only matches the author's login; this covers teams the author is a member of.
+		approvers = append(approvers, a.client.UserReviewers(a.client.PR().GetUser().GetLogin())...)
+	}
+
 	a.codeowners.ApplyApprovals(approvers)
 
 	if len(approvalsToDismiss) > 0 {

@@ -33,6 +33,7 @@ type Client interface {
 	InitPR(pr_id int) error
 	PR() *github.PullRequest
 	InitUserReviewerMap(reviewers []string) error
+	UserReviewers(ghUser string) []codeowners.Slug
 	GetTokenUser() (string, error)
 	InitReviews() error
 	AllApprovals() ([]*CurrentApproval, error)
@@ -132,6 +133,11 @@ func (gh *GHClient) InitUserReviewerMap(reviewers []string) error {
 	}
 	gh.userReviewerMap = makeGHUserReviwerMap(reviewers, teamFetch)
 	return nil
+}
+
+// UserReviewers returns the required owners ghUser can sign off for: the user and the teams they are a member of.
+func (gh *GHClient) UserReviewers(ghUser string) []codeowners.Slug {
+	return gh.userReviewerMap[strings.ToLower(ghUser)]
 }
 
 func (gh *GHClient) GetTokenUser() (string, error) {

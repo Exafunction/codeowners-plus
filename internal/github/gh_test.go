@@ -1028,6 +1028,13 @@ func TestInitUserReviewerMap(t *testing.T) {
 			t.Errorf("expected user %s to be in userReviewerMap", user)
 		}
 	}
+
+	if got := gh.UserReviewers("Team_Member2"); !f.SlicesItemsMatch(got, expectedMap["team_member2"]) {
+		t.Errorf("expected UserReviewers to return %v, got %v", expectedMap["team_member2"], got)
+	}
+	if got := gh.UserReviewers("stranger"); len(got) != 0 {
+		t.Errorf("expected no reviewers for a non-owner, got %v", got)
+	}
 }
 
 func TestIsInLabels(t *testing.T) {

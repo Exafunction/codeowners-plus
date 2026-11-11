@@ -110,6 +110,7 @@ func (m *mockCodeOwners) UnownedFiles() []string {
 type mockGitHubClient struct {
 	pr                        *github.PullRequest
 	userReviewerMapError      error
+	userReviewers             map[string][]codeowners.Slug
 	currentApprovals          []*gh.CurrentApproval
 	currentApprovalsError     error
 	tokenUser                 string
@@ -143,6 +144,10 @@ func (m *mockGitHubClient) PR() *github.PullRequest {
 
 func (m *mockGitHubClient) InitUserReviewerMap(owners []string) error {
 	return m.userReviewerMapError
+}
+
+func (m *mockGitHubClient) UserReviewers(ghUser string) []codeowners.Slug {
+	return m.userReviewers[ghUser]
 }
 
 func (m *mockGitHubClient) GetCurrentReviewerApprovals() ([]*gh.CurrentApproval, error) {
@@ -746,6 +751,9 @@ func TestProcessApprovalsAndReviewers(t *testing.T) {
 		tokenUser            string
 		tokenUserError       error
 		userReviewerMapError error
+		author               string
+		authorTeams          []codeowners.Slug
+		allowSelfApproval    bool
 		approvalsError       error
 		requestedError       error
 		reviewedError        error
@@ -1004,12 +1012,47 @@ func TestProcessApprovalsAndReviewers(t *testing.T) {
 			expectSuccess:     false,
 			expectedApprovals: codeowners.NewSlugs([]string{}),
 		},
+		{
+			name: "self approval covers a team the author is a member of",
+			requiredOwners: codeowners.ReviewerGroups{
+				&codeowners.ReviewerGroup{Names: codeowners.NewSlugs([]string{"@org/team1"})},
+			},
+			author:            "author",
+			authorTeams:       codeowners.NewSlugs([]string{"@org/team1"}),
+			allowSelfApproval: true,
+			expectSuccess:     true,
+			expectedApprovals: codeowners.NewSlugs([]string{"@org/team1"}),
+		},
+		{
+			name: "self approval does not cover a team the author is not a member of",
+			requiredOwners: codeowners.ReviewerGroups{
+				&codeowners.ReviewerGroup{Names: codeowners.NewSlugs([]string{"@org/team1"})},
+				&codeowners.ReviewerGroup{Names: codeowners.NewSlugs([]string{"@org/team2"})},
+			},
+			author:            "author",
+			authorTeams:       codeowners.NewSlugs([]string{"@org/team1"}),
+			allowSelfApproval: true,
+			expectSuccess:     false,
+			expectedApprovals: codeowners.NewSlugs([]string{"@org/team1"}),
+		},
+		{
+			name: "team membership is not an approval without allow_self_approval",
+			requiredOwners: codeowners.ReviewerGroups{
+				&codeowners.ReviewerGroup{Names: codeowners.NewSlugs([]string{"@org/team1"})},
+			},
+			author:            "author",
+			authorTeams:       codeowners.NewSlugs([]string{"@org/team1"}),
+			expectSuccess:     false,
+			expectedApprovals: codeowners.NewSlugs([]string{}),
+		},
 	}
 
 	for _, tc := range tt {
 		t.Run(tc.name, func(t *testing.T) {
 			// Create mock instances
 			mockGH := &mockGitHubClient{
+				pr:                      &github.PullRequest{User: &github.User{Login: github.String(tc.author)}},
+				userReviewers:           map[string][]codeowners.Slug{tc.author: tc.authorTeams},
 				currentApprovals:        tc.currentApprovals,
 				currentApprovalsError:   tc.approvalsError,
 				currentlyRequested:      tc.currentlyRequested,
@@ -1052,8 +1095,9 @@ func TestProcessApprovalsAndReviewers(t *testing.T) {
 						Approval:  tc.enforcementApproval,
 						FailCheck: true,
 					},
-					MaxReviews: tc.maxReviews,
-					MinReviews: tc.minReviews,
+					MaxReviews:        tc.maxReviews,
+					MinReviews:        tc.minReviews,
+					AllowSelfApproval: tc.allowSelfApproval,
 					AdminBypass: &owners.AdminBypass{
 						Enabled:      tc.name == "admin bypass approval succeeds",
 						AllowedUsers: []string{},
